@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=RommDeck game link
+Comment=Open RommDeck for a game handed over by RomM
+Exec=/home/james/.local/bin/rommdeck-open %u
+Terminal=false
+NoDisplay=true
+MimeType=x-scheme-handler/rommdeck;
+StartupNotify=false
