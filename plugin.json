@@ -1,17 +1,50 @@
 {
   "id": "rommdeck",
   "name": "RommDeck",
-  "version": "1.0.0",
-  "description": "Open a game on the machine RommDeck keeps in sync.",
+  "version": "1.1.0",
+  "description": "Open a game on the machine RommDeck manages: it downloads it if needed, then plays it.",
   "homepage": "https://github.com/s0liton/RommDeck",
+  "settings": [
+    {
+      "key": "enabled",
+      "label": "Offer RommDeck when you press Play",
+      "type": "boolean",
+      "default": true,
+      "help": "Off hides the button; RomM's own Play stays as it was."
+    },
+    {
+      "key": "extra_query",
+      "label": "Hand-over parameters",
+      "type": "text",
+      "default": "&play=1",
+      "placeholder": "&play=1",
+      "help": "Appended to the rommdeck:// URL. RommDeck reads play=1 as download it, then play it; clear this to only open the game."
+    },
+    {
+      "key": "web_url",
+      "label": "RommDeck's web address",
+      "type": "url",
+      "default": "http://127.0.0.1:8780",
+      "help": "Used by the Settings shortcut, for when the rommdeck:// handler isn't registered."
+    }
+  ],
   "actions": [
     {
       "id": "open",
       "label": "Open in RommDeck",
       "icon": "mdi-monitor-dashboard",
-      "url": "rommdeck://open?rom={rom_id}&platform={platform_slug}&name={rom_name}",
+      "url": "rommdeck://open?rom={rom_id}&platform={platform_slug}&name={rom_name}{setting.extra_query}",
       "open": "new-tab",
-      "slot": "game.play"
+      "slot": "game.play",
+      "enabled_by": "enabled"
+    },
+    {
+      "id": "dashboard",
+      "label": "RommDeck",
+      "icon": "mdi-monitor-dashboard",
+      "url": "{setting.web_url}",
+      "open": "new-tab",
+      "slot": "app.nav"
     }
   ]
 }

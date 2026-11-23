@@ -54,6 +54,19 @@ brings the app up. On Windows, a registry entry under
 `HKEY_CLASSES_ROOT\rommdeck` that runs the app with `%1` does the same, once
 RommDeck reads the argument.
 
+## Settings
+
+The manifest declares three settings, which RomM renders as a form on
+**Settings → Plugins** and stores beside the manifest. They reach the URL as
+`{setting.<key>}`, so they change what the button does rather than only being
+displayed:
+
+| Setting | What it changes |
+| --- | --- |
+| `enabled` | Off hides the button entirely (`enabled_by`); RomM's own Play stays as it was. |
+| `extra_query` | Appended to the hand-over URL — `&play=1` makes RommDeck download the game and play it, and clearing it only opens the game. |
+| `web_url` | The address the **RommDeck** entry in Settings → navigation points at, for a machine where the `rommdeck://` handler isn't registered. |
+
 ## Choose where the button appears
 
 `slot` decides which surface the action lands on:
