@@ -30,11 +30,27 @@ volumes:
 
 ## Register the handler
 
-The URL means nothing until the machine running RommDeck knows the scheme. On
-Linux, a `.desktop` entry with `MimeType=x-scheme-handler/rommdeck` that runs
-`rommdeck-open %u`, registered with `xdg-mime default`, is enough; the script
-receives the URL on the command line and opens RommDeck. On Windows, a registry
-entry under `HKEY_CLASSES_ROOT\rommdeck` does the same.
+The URL means nothing until the machine running RommDeck knows the scheme. This
+repository carries the handler for Linux: `rommdeck-open` (a small Python
+script) plus a `.desktop` entry that claims the scheme.
+
+```bash
+install -m755 rommdeck-open ~/.local/bin/rommdeck-open
+sed "s/USER/$USER/" rommdeck-url.desktop.example > ~/.local/share/applications/rommdeck-url.desktop
+update-desktop-database ~/.local/share/applications
+xdg-mime default rommdeck-url.desktop x-scheme-handler/rommdeck
+xdg-mime query default x-scheme-handler/rommdeck   # must echo rommdeck-url.desktop
+```
+
+The handler asks the copy of RommDeck that is already serving to open the game
+(`POST /api/deeplink` on its local API), and otherwise starts RommDeck with the
+URL on its command line. Either way the UI lands on that game: the Library tab,
+its platform, the game's card scrolled into view and outlined.
+
+That deep link is a RommDeck feature; on a release without it the URL only
+brings the app up. On Windows, a registry entry under
+`HKEY_CLASSES_ROOT\rommdeck` that runs the app with `%1` does the same, once
+RommDeck reads the argument.
 
 ## Choose where the button appears
 
