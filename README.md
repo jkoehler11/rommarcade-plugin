@@ -45,7 +45,9 @@ xdg-mime query default x-scheme-handler/rommdeck   # must echo rommdeck-url.desk
 The handler asks the copy of RommDeck that is already serving to open the game
 (`POST /api/deeplink` on its local API), and otherwise starts RommDeck with the
 URL on its command line. Either way the UI lands on that game: the Library tab,
-its platform, the game's card scrolled into view and outlined.
+its platform, and the game's own button pressed, so a game that isn't on the
+machine yet starts downloading. A game that is already there keeps its History
+and Remove buttons untouched.
 
 That deep link is a RommDeck feature; on a release without it the URL only
 brings the app up. On Windows, a registry entry under
