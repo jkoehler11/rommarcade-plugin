@@ -226,12 +226,31 @@ def spawn(argv: list[str]) -> subprocess.Popen | None:
         return None
 
 
+def newest_appimage(folder: Path) -> Path | None:
+    """The newest `RomMArcade*.AppImage` in a folder, if there is one.
+
+    The AppImage is a single file with no install step, so the usual homes for
+    one are the only places worth looking. `ROMARCADE_APP` points at a copy kept
+    anywhere else.
+    """
+    try:
+        found = [
+            path
+            for path in folder.glob("RomMArcade*.AppImage")
+            if path.is_file() and os.access(path, os.X_OK)
+        ]
+    except OSError:
+        return None
+    return max(found, key=lambda path: path.stat().st_mtime, default=None)
+
+
 def app_commands() -> list[list[str]]:
     """Ways to open the desktop window on this machine, most specific first.
 
     Every candidate is a path discovered here, not a guess: the release bundle
     installs `rommarcade-desktop`, `packaging/install.sh` writes the same name,
-    and a source checkout runs the `rommarcade` CLI.
+    an AppImage carries no install step so it is looked for where AppImages are
+    kept, and a source checkout runs the `rommarcade` CLI.
     """
     commands: list[list[str]] = []
 
@@ -269,6 +288,10 @@ def app_commands() -> list[list[str]]:
         ):
             if os.access(candidate, os.X_OK):
                 add([str(candidate)])
+        for folder in (HOME / "Applications", HOME / "Downloads"):
+            image = newest_appimage(folder)
+            if image is not None:
+                add([str(image)])
 
     cli = shutil.which("rommarcade")
     if cli:

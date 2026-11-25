@@ -19,7 +19,7 @@ removing the plugin needs no restart.
 
 | On the RomM host | On the machine you play on |
 | --- | --- |
-| RomM 5.x with the plugin shelf, which today means [ROMulus](https://github.com/jkoehler11/ROMulus). A stock RomM release answers 404 on `GET /api/plugins` and has nowhere to install this. | [RomMArcade](https://github.com/jkoehler11/RomMArcade), from its releases page or `packaging/install.sh` |
+| RomM 5.x with the plugin shelf, which today means [ROMulus](https://github.com/jkoehler11/ROMulus). A stock RomM release answers 404 on `GET /api/plugins` and has nowhere to install this. | [RomMArcade](https://github.com/jkoehler11/RomMArcade), from its releases page (AppImage, `.pkg`, setup `.exe`) or `packaging/install.sh` |
 | | EmuDeck, which owns the ROM folders, the launchers and the emulators RomMArcade drives |
 
 The plugin is optional. RomMArcade works without it; the plugin only puts its
@@ -64,8 +64,10 @@ What the handler does, in order, so a press always lands somewhere:
    configured port, then 8790) and posts the game to `POST /api/deeplink`. The
    service keeps one pending target and hands it out once, so a page reload does
    not navigate again.
-2. Starts the desktop app when nothing answers, waits for its service, then posts
-   the same target.
+2. Starts the desktop app when nothing answers (`rommarcade-desktop`, the bundle
+   under `~/.local/share/rommarcade-desktop`, or a `RomMArcade*.AppImage` in
+   `~/Applications` or `~/Downloads`; `ROMARCADE_APP` names a copy kept
+   anywhere else), waits for its service, then posts the same target.
 3. Opens the web UI in the browser as a last resort.
 
 Every step is appended to `~/.local/state/rommarcade-open.log`, which is the file
