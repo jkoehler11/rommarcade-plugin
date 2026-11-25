@@ -1,16 +1,17 @@
 {
-  "id": "rommdeck",
-  "name": "RommDeck",
-  "version": "1.1.0",
-  "description": "Open a game on the machine RommDeck manages: it downloads it if needed, then plays it.",
-  "homepage": "https://github.com/s0liton/RommDeck",
+  "id": "rommarcade",
+  "name": "RomMArcade",
+  "version": "0.1.0",
+  "description": "Open a game in RomMArcade: it installs the game through EmuDeck if needed, then plays it.",
+  "author": "jkoehler11",
+  "homepage": "https://github.com/jkoehler11/RomMArcade",
   "settings": [
     {
       "key": "enabled",
-      "label": "Offer RommDeck when you press Play",
+      "label": "Offer RomMArcade when you press Play",
       "type": "boolean",
       "default": true,
-      "help": "Off hides the button; RomM's own Play stays as it was."
+      "help": "Off hides the Play entry; RomM's own Play stays as it was."
     },
     {
       "key": "extra_query",
@@ -18,30 +19,30 @@
       "type": "text",
       "default": "&play=1",
       "placeholder": "&play=1",
-      "help": "Appended to the rommdeck:// URL. RommDeck reads play=1 as download it, then play it; clear this to only open the game."
+      "help": "Appended to the rommarcade:// link. play=1 installs the game first and then starts it; clear this to only open the game."
     },
     {
       "key": "web_url",
-      "label": "RommDeck's web address",
+      "label": "RomMArcade's web address",
       "type": "url",
-      "default": "http://127.0.0.1:8780",
-      "help": "Used by the Settings shortcut, for when the rommdeck:// handler isn't registered."
+      "default": "http://127.0.0.1:8790",
+      "help": "The address the RomMArcade entry in Settings navigation opens, for a machine where the rommarcade:// handler is not registered."
     }
   ],
   "actions": [
     {
-      "id": "open",
-      "label": "Open in RommDeck",
-      "icon": "mdi-monitor-dashboard",
-      "url": "rommdeck://open?rom={rom_id}&platform={platform_slug}&name={rom_name}{setting.extra_query}",
+      "id": "play",
+      "label": "Play in RomMArcade",
+      "icon": "mdi-gamepad-variant",
+      "url": "rommarcade://open?rom={rom_id}&platform={platform_slug}&name={rom_name}{setting.extra_query}",
       "open": "new-tab",
       "slot": "game.play",
       "enabled_by": "enabled"
     },
     {
-      "id": "dashboard",
-      "label": "RommDeck",
-      "icon": "mdi-monitor-dashboard",
+      "id": "app",
+      "label": "RomMArcade",
+      "icon": "mdi-gamepad-variant",
       "url": "{setting.web_url}",
       "open": "new-tab",
       "slot": "app.nav"

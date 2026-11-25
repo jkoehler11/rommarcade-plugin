@@ -1,0 +1,10 @@
+[Desktop Entry]
+Type=Application
+Name=RomMArcade game link
+Comment=Open RomMArcade for a game handed over by RomM
+Exec=__BIN__/rommarcade-open %u
+MimeType=x-scheme-handler/rommarcade;
+Icon=applications-games
+Terminal=false
+NoDisplay=true
+Categories=Game;

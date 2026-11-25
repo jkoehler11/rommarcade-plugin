@@ -1,0 +1,372 @@
+#!/usr/bin/env python3
+"""Open RomMArcade on a game, from the URL RomM's plugin button opens.
+
+RomM's plugin points its "Play in RomMArcade" button at a URL like
+
+    rommarcade://open?rom=428&platform=ngc&name=Luigi%27s%20Mansion&play=1
+
+and this is what the desktop registers for the `rommarcade` scheme. RomMArcade
+owns the deep link: its local service keeps one pending target and consumes it
+once, so the UI lands on that game instead of the library's front page. This
+handler finds the copy that is already serving and hands the URL over. A copy
+that is not running is started first, and the URL is handed over as soon as the
+new service answers.
+
+The desktop app reads no URL from its command line, which is why starting it and
+then posting the target is the only order that works: the queue is persisted, so
+a target that arrives before the page loads still lands.
+
+Nothing here blocks the browser: the app is started detached and every step is
+appended to a log.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import shutil
+import subprocess
+import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
+from pathlib import Path
+
+PRODUCT = "RomMArcade"
+SCHEME = "rommarcade"
+DEFAULT_PORT = 8790
+# A PyInstaller bundle can take several seconds to draw its window, and the
+# service only answers once it is up.
+WAIT_SECONDS = 30.0
+POLL_SECONDS = 0.25
+
+HOME = Path(os.path.expanduser("~"))
+
+
+# -- paths -------------------------------------------------------------------
+
+
+def _xdg(env: str, fallback: str) -> Path:
+    value = os.environ.get(env, "").strip()
+    return Path(value) if value else Path(fallback).expanduser()
+
+
+def config_dir() -> Path:
+    """Where RomMArcade keeps config.json, matching the app's own rules."""
+    override = os.environ.get("ROMARCADE_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        root = os.environ.get("APPDATA") or str(HOME)
+        return Path(root) / "RomMArcade"
+    if sys.platform == "darwin":
+        return HOME / "Library" / "Application Support" / "RomMArcade"
+    return _xdg("XDG_CONFIG_HOME", "~/.config") / "rommarcade"
+
+
+def data_dir() -> Path:
+    """Where the app publishes desktop-port and its deeplink queue."""
+    override = os.environ.get("ROMARCADE_HOME", "").strip()
+    if override:
+        return Path(override).expanduser()
+    if sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or os.environ.get("APPDATA") or str(HOME)
+        return Path(root) / "RomMArcade"
+    if sys.platform == "darwin":
+        return HOME / "Library" / "Application Support" / "RomMArcade"
+    return _xdg("XDG_DATA_HOME", "~/.local/share") / "rommarcade"
+
+
+def log_path() -> Path:
+    override = os.environ.get("ROMARCADE_HOME", "").strip()
+    if override:
+        return Path(override).expanduser() / "rommarcade-open.log"
+    if sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or str(HOME)
+        return Path(root) / "RomMArcade" / "rommarcade-open.log"
+    if sys.platform == "darwin":
+        return HOME / "Library" / "Logs" / "RomMArcade" / "open.log"
+    return _xdg("XDG_STATE_HOME", "~/.local/state") / "rommarcade-open.log"
+
+
+def log(message: str) -> None:
+    line = f"{time.strftime('%Y-%m-%d %H:%M:%S')} {message}\n"
+    try:
+        path = log_path()
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as handle:
+            handle.write(line)
+    except OSError:
+        pass
+
+
+# -- the local service -------------------------------------------------------
+
+
+def service_bases() -> list[str]:
+    """Every address a local copy could be answering on, best first.
+
+    `ROMARCADE_BASE` makes the list exactly one entry: an explicit address means
+    "talk to this copy", which is what a test or a second install needs. Without
+    it the port the desktop shell published wins, then the configured port, then
+    the default. The list is read again on each poll, because `desktop-port` does
+    not exist until the service is up.
+    """
+    override = os.environ.get("ROMARCADE_BASE", "").strip()
+    if override:
+        return [override.rstrip("/")]
+
+    bases: list[str] = []
+
+    try:
+        port = int((data_dir() / "desktop-port").read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        port = 0
+    if port:
+        bases.append(f"http://127.0.0.1:{port}")
+
+    try:
+        config = json.loads((config_dir() / "config.json").read_text(encoding="utf-8"))
+        port = int((config.get("web") or {}).get("port") or 0)
+    except (OSError, ValueError, TypeError, AttributeError):
+        port = 0
+    if port:
+        bases.append(f"http://127.0.0.1:{port}")
+
+    bases.append(f"http://127.0.0.1:{DEFAULT_PORT}")
+
+    seen: set[str] = set()
+    unique = []
+    for base in bases:
+        if base not in seen:
+            seen.add(base)
+            unique.append(base)
+    return unique
+
+
+def serving() -> str:
+    """The address of a local RomMArcade that is answering, or an empty string.
+
+    The product name is checked, not just the port: 8790 is a number something
+    else could own, and handing a game to a stranger is worse than starting the
+    app.
+    """
+    for base in service_bases():
+        try:
+            with urllib.request.urlopen(f"{base}/api/status", timeout=1.5) as reply:
+                status = json.loads(reply.read() or b"{}")
+        except (urllib.error.URLError, OSError, ValueError):
+            continue
+        if isinstance(status, dict) and status.get("product") == PRODUCT:
+            return base
+    return ""
+
+
+def hand_over(base: str, url: str) -> bool:
+    """Queue the URL on the running copy, which navigates to the game."""
+    body = json.dumps({"url": url}).encode("utf-8")
+    request = urllib.request.Request(
+        f"{base}/api/deeplink",
+        data=body,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=5) as reply:
+            return 200 <= reply.status < 300
+    except (urllib.error.URLError, OSError) as exc:
+        log(f"{base} would not take the link: {exc}")
+        return False
+
+
+# -- starting the app --------------------------------------------------------
+
+
+def session_env() -> dict[str, str]:
+    """The variables a GUI app needs that a URL launch may not inherit."""
+    env = dict(os.environ)
+    runtime = env.get("XDG_RUNTIME_DIR") or ""
+    if not runtime and hasattr(os, "getuid"):
+        runtime = f"/run/user/{os.getuid()}"
+    if runtime:
+        env.setdefault("XDG_RUNTIME_DIR", runtime)
+        if not env.get("WAYLAND_DISPLAY"):
+            try:
+                for candidate in sorted(Path(runtime).glob("wayland-*")):
+                    if not candidate.name.endswith(".lock"):
+                        env["WAYLAND_DISPLAY"] = candidate.name
+                        break
+            except OSError:
+                pass
+        env.setdefault("DBUS_SESSION_BUS_ADDRESS", f"unix:path={runtime}/bus")
+        env.setdefault("PULSE_SERVER", f"unix:{runtime}/pulse/native")
+    env.setdefault("DISPLAY", ":0")
+    return env
+
+
+def spawn(argv: list[str]) -> subprocess.Popen | None:
+    kwargs: dict = {}
+    if sys.platform == "win32":
+        kwargs["creationflags"] = (
+            subprocess.CREATE_NEW_PROCESS_GROUP | subprocess.DETACHED_PROCESS
+        )
+    try:
+        return subprocess.Popen(
+            argv,
+            env=session_env(),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            start_new_session=sys.platform != "win32",
+            **kwargs,
+        )
+    except OSError as exc:
+        log(f"could not start {argv[0]}: {exc}")
+        return None
+
+
+def app_commands() -> list[list[str]]:
+    """Ways to open the desktop window on this machine, most specific first.
+
+    Every candidate is a path discovered here, not a guess: the release bundle
+    installs `rommarcade-desktop`, `packaging/install.sh` writes the same name,
+    and a source checkout runs the `rommarcade` CLI.
+    """
+    commands: list[list[str]] = []
+
+    def add(command: list[str]) -> None:
+        if all(existing[0] != command[0] for existing in commands):
+            commands.append(command)
+
+    override = os.environ.get("ROMARCADE_APP", "").strip()
+    if override:
+        add([override])
+
+    if sys.platform == "darwin":
+        for bundle in (
+            Path("/Applications/RomMArcade.app"),
+            HOME / "Applications" / "RomMArcade.app",
+        ):
+            if bundle.is_dir():
+                add(["open", str(bundle)])
+                break
+    elif sys.platform == "win32":
+        root = os.environ.get("LOCALAPPDATA") or ""
+        for candidate in (
+            Path(root) / "Programs" / "RomMArcade" / "RomMArcade.exe",
+            Path(root) / "RomMArcade" / "RomMArcade.exe",
+        ):
+            if candidate.is_file():
+                add([str(candidate)])
+    else:
+        found = shutil.which("rommarcade-desktop")
+        if found:
+            add([found])
+        for candidate in (
+            HOME / ".local" / "bin" / "rommarcade-desktop",
+            HOME / ".local" / "share" / "rommarcade-desktop" / "RomMArcade",
+        ):
+            if os.access(candidate, os.X_OK):
+                add([str(candidate)])
+
+    cli = shutil.which("rommarcade")
+    if cli:
+        add([cli, "app"])
+    return commands
+
+
+# -- main --------------------------------------------------------------------
+
+
+def parse(url: str) -> dict[str, object] | None:
+    """The target in the URL, or None when it is not one of ours."""
+    parts = urllib.parse.urlsplit(url.strip())
+    if parts.scheme.lower() != SCHEME:
+        log(f"not a {SCHEME}:// URL: {url}")
+        return None
+    action = (parts.netloc or parts.path.strip("/")).lower()
+    if action not in ("open", "play"):
+        log(f"unknown {SCHEME} action: {action or 'none'}")
+        return None
+    query = urllib.parse.parse_qs(parts.query)
+    try:
+        rom_id = int((query.get("rom") or query.get("rom_id") or ["0"])[0])
+    except ValueError:
+        rom_id = 0
+    if rom_id <= 0:
+        log(f"the URL names no game: {url}")
+        return None
+    return {
+        "rom": rom_id,
+        "name": (query.get("name") or query.get("rom_name") or [""])[0],
+        "platform": (query.get("platform") or query.get("platform_slug") or [""])[0],
+        "play": action == "play" or (query.get("play") or [""])[0].lower() in ("1", "true", "yes"),
+    }
+
+
+def open_ui(base: str) -> int:
+    """Show the web UI for an install that cannot take the link itself."""
+    opener = shutil.which("xdg-open") or shutil.which("open")
+    if opener and spawn([opener, base]) is not None:
+        log(f"opened the web UI at {base}")
+        return 0
+    return 1
+
+
+def main(argv: list[str]) -> int:
+    if len(argv) < 2:
+        log("called without a URL")
+        return 2
+
+    url = argv[1]
+    target = parse(url)
+    if target is None:
+        return 2
+    log(
+        f"{url} rom={target['rom']} name={target['name'] or '?'} "
+        f"platform={target['platform'] or '?'} play={int(bool(target['play']))}"
+    )
+
+    base = serving()
+    if base:
+        if hand_over(base, url):
+            log(f"handed to the running copy on {base}")
+            return 0
+        log(f"{base} answered but would not take the link")
+        # A build without /api/deeplink: a second launch would reuse the same
+        # service, so show the page rather than wait for a hand-over that cannot
+        # happen.
+        return open_ui(base)
+
+    started: subprocess.Popen | None = None
+    for command in app_commands():
+        started = spawn(command)
+        if started is not None:
+            log(f"started {' '.join(command)}")
+            break
+
+    if started is not None:
+        deadline = time.time() + WAIT_SECONDS
+        while time.time() < deadline:
+            base = serving()
+            if base and hand_over(base, url):
+                log(f"handed to the copy that just started on {base}")
+                return 0
+            if started.poll() is not None:
+                log("the app exited before it answered; falling back")
+                break
+            time.sleep(POLL_SECONDS)
+
+    # Last resort: a copy that is serving but too old to take the link can still
+    # show the UI, which picks the target up from the queue on load.
+    base = serving()
+    if base and open_ui(base) == 0:
+        return 0
+
+    log("RomMArcade was not found on this machine")
+    return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main(sys.argv))
